@@ -1,95 +1,81 @@
-import os
 import fitz
 from pathlib import Path
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
-import uuid
-from qdrant_client.models import PointStruct
-from groq import Groq
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client_groq = Groq(api_key=GROQ_API_KEY)
-model = SentenceTransformer("BAAI/bge-m3")
 pdf_files = list(Path("data").glob("*.pdf"))
-collection_name = "university_docs2"
-
+splitter = RecursiveCharacterTextSplitter(
+chunk_size=600,     
+chunk_overlap=120,    
+separators=["\n\n", "\n", ". ", " "]
+)
 client = QdrantClient(
     url="http://localhost:6333",
     timeout=30,
     trust_env=False,
     check_compatibility=False,
 )
+DENSE_MODEL = "intfloat/multilingual-e5-large"
+SPARSE_MODEL = "qdrant/bm25"
+COLLECTION_NAME = "university_docsNEW"
+client.set_model(DENSE_MODEL)
+client.set_sparse_model(SPARSE_MODEL)
 
-if not client.collection_exists(collection_name):
+if not client.collection_exists(COLLECTION_NAME):
         client.create_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(
-                size=1024, 
-                distance=Distance.COSINE
-            ),
+            collection_name=COLLECTION_NAME,
+            vectors_config=client.get_fastembed_vector_params(),
+            sparse_vectors_config=client.get_fastembed_sparse_vector_params(),
         )
-        print(f"Готово, '{collection_name}'  создана!")
+        print(f"Готово, '{COLLECTION_NAME}'  создана!")
 else:
-    print(f"уже есть '{collection_name}' ")
+    print(f"уже есть '{COLLECTION_NAME}' ")
 
 def extract_textANDtables_from_pdf(pdf):
     doc = fitz.open(pdf)
-    total_text = ""
-    for page in doc:
-        page_text = page.get_text("text")
-        tabs = page.find_tables()
-        md_tables = ""
-        if tabs.tables:
-            for table in tabs.tables:
-                data = table.extract()
-                if not data: continue
-                table_str = "\n[ДАННЫЕ ИЗ ТАБЛИЦЫ]:\n"
-                for i, row in enumerate(data):
-                    clean_row = [str(c).replace("\n", " ") if c else "" for c in row]
-                    table_str += "| " + " | ".join(clean_row) + " |\n"
-                    if i == 0:
-                        table_str += "| " + " | ".join(["---"] * len(row)) + " |\n"
-                md_tables += table_str + "\n"
-        total_text += f"{page_text}\n{md_tables}\n"
+    pages = []
 
+    for page_index, page in enumerate(doc, start=1):
+        page_text = page.get_text("text").strip()
+        if page_text:
+            pages.append((page_index, page_text))
     doc.close()
-    return total_text
+    return pages
 
-all_docs = []
+
 
 for pdf in pdf_files:
-    text = extract_textANDtables_from_pdf(pdf)
-    all_docs.append({
-        "text": text,
-        "source": pdf.name
-    })
+    documents = []
+    metadatas = []
+
+    pages = extract_textANDtables_from_pdf(pdf)
     print(f"Пдф файл прочитан {pdf.name}")
 
-    splitter = RecursiveCharacterTextSplitter(
-    chunk_size=600,     
-    chunk_overlap=120,    
-    separators=["\n\n", "\n", ". ", " "]
-    )
-    chunks = splitter.split_text(text)
-    embeddings = model.encode(chunks)
+    for page_number, page_text in pages:
+        chunks = splitter.split_text(page_text)
 
-    points = []
-    for chunk_text, vector in zip(chunks, embeddings):
-        points.append(
-            PointStruct(
-                id=str(uuid.uuid4()),      # Уникальный ID
-                vector=vector.tolist(),    # Превращаем numpy-массив в обычный список
-                payload={                  # Твои метаданные
-                    "text": chunk_text, 
-                    "source": pdf.name
+        for i, chunk_text in enumerate(chunks):
+            chunk_text = chunk_text.strip()
+            if not chunk_text:
+                continue
+            documents.append(chunk_text)
+            metadatas.append(
+                {
+                    "source": pdf.name,
+                    "page": page_number,
+                    "chunk_index": i,
+                    "parser": "fitz",
                 }
             )
+
+    if documents:
+        print(f"Загружаю {len(documents)} чанков в Qdrant...")
+        client.add(
+            collection_name=COLLECTION_NAME,
+            documents=documents,
+            metadata=metadatas,
+            batch_size=32,
         )
-    
-    if points:
-        client.upsert(collection_name=collection_name, points=points)
-        print(f"Добавлено {len(points)} чанков из {pdf.name}")
+        print("Успех! Данные проиндексированы для будущего hybrid search.")
     else:
-        print(f"Пропуск {pdf.name}: не найдено текста для индексации.")
+        print("Ошибка: не найдено документов для индексации.")
