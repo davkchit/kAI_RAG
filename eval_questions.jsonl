@@ -1,14 +1,30 @@
 {"question": "Кто директор набережночелнинского филиала?", "must_contain": ["Мустафин Азат Филькатович"], "expected_source": "university.pdf"}
-{"question": "Какой адрес набережночелнинского филиала?", "must_contain": ["423814"], "expected_source": "university.pdf"}
+{"question": "Как зовут ректора КНИТУ-КАИ?", "must_contain": ["Алибаев Тимур Лазович"], "expected_source": "university.pdf"}
+{"question": "Какой адрес набережночелнинского филиала?", "must_contain": ["423814", "Академика Королева"], "expected_source": "university.pdf"}
+{"question": "Какой телефон приемной комиссии филиала?", "must_contain": ["8-963-123-59-43"], "expected_source": "university.pdf"}
+{"question": "Какой телефон приемной директора филиала?", "must_contain": ["8(8552) 99-91-95"], "expected_source": "university.pdf"}
+{"question": "Какой email у филиала?", "must_contain": ["kaichelny@kai.ru"], "expected_source": "university.pdf"}
+{"question": "Какие соцсети есть у филиала?", "must_contain": ["VK", "Telegram"], "expected_source": "university.pdf"}
 {"question": "Есть ли у филиала собственное общежитие?", "must_contain": ["отсутств"], "expected_source": "university.pdf"}
 {"question": "Есть ли военный учебный центр?", "must_contain": ["отсутств"], "expected_source": "university.pdf"}
+{"question": "Кто начальник учебно-методического отдела филиала?", "must_contain": ["Зорина Ирина Владимировна"], "expected_source": "university.pdf"}
+{"question": "Какие контакты у учебно-методического отдела филиала?", "must_contain": ["IVZorina@kai.ru", "8(963)123-46-97"], "expected_source": "university.pdf"}
 {"question": "Какая средняя стоимость очного обучения?", "must_contain": ["172 000"], "expected_source": "university.pdf"}
+{"question": "Какой минимальный порог стоимости обучения?", "must_contain": ["68 400"], "expected_source": "university.pdf"}
+{"question": "Сколько бюджетных мест у филиала?", "must_contain": ["81"], "expected_source": "university.pdf"}
+{"question": "Сколько коммерческих мест у филиала?", "must_contain": ["211"], "expected_source": "university.pdf"}
+{"question": "Какой проходной балл на бюджет по информационным системам и технологиям?", "must_contain": ["56+"], "expected_source": "university.pdf"}
+{"question": "Какой проходной балл на бюджет по информатике и вычислительной технике?", "must_contain": ["51+"], "expected_source": "university.pdf"}
+{"question": "Какой проходной балл на бюджет по конструкторско-технологическому обеспечению машиностроительных производств?", "must_contain": ["48+"], "expected_source": "university.pdf"}
+{"question": "Кто генеральный партнер филиала?", "must_contain": ["ПАО «КАМАЗ»"], "expected_source": "university.pdf"}
+{"question": "На базе какой школы реализуется проект Инженерная школа?", "must_contain": ["школы №30"], "expected_source": "university.pdf"}
+{"question": "Когда был основан филиал?", "must_contain": ["18 октября 2001"], "expected_source": "university.pdf"}
 {"question": "Какой номер лицензии у филиала?", "must_contain": ["Л035-00115-16/00097156"], "expected_source": "university.pdf"}
 {"question": "Какой номер аккредитации у филиала?", "must_contain": ["А007-00115-16/01255601"], "expected_source": "university.pdf"}
-{"question": "До какого срока надо подать заявку на целевую квоту через КАМАЗ?", "must_contain": ["до начала июля"], "expected_source": "university.pdf"}
+{"question": "Какое место занимает филиал в рейтинге Минтруда РФ по трудоустройству выпускников?", "must_contain": ["44-е"], "expected_source": "university.pdf"}
 {"question": "Есть ли магистратура?", "must_contain": ["магистрат"], "expected_source": "Правила приема BO.pdf"}
-{"question": "Какой телефон приемной директора филиала?", "must_contain": ["8(8552) 99-91-95"], "expected_source": "university.pdf"}
-{"question": "Какие соцсети есть у филиала?", "must_contain": ["VK", "Telegram"], "expected_source": "university.pdf"}
-{"question": "Как зовут ректора КНИТУ-КАИ?", "must_contain": ["Алибаев Тимур Лазович"], "expected_source": "university.pdf"}
-{"question": "Есть ли у филиала военный учебный центр и общежитие?", "must_contain": ["военный учебный центр", "общежитие", "отсутств"], "expected_source": "university.pdf"}
-{"question": "Какой телефон приемной комиссии филиала?", "must_contain": ["8-963-123-59-43"], "expected_source": "university.pdf"}
+{"question": "Какое образование нужно для поступления в магистратуру?", "must_contain": ["высшего образования"], "expected_source": "Правила приема BO.pdf"}
+{"question": "В сколько организаций можно одновременно поступать на бакалавриат и специалитет?", "must_contain": ["5", "организац"], "expected_source": "Правила приема BO.pdf"}
+{"question": "По скольким специальностям или направлениям можно одновременно участвовать в конкурсе в КНИТУ-КАИ на бакалавриат и специалитет?", "must_contain": ["5", "специальност"], "expected_source": "Правила приема BO.pdf"}
+{"question": "Какой минимальный балл подтверждает успешное прохождение вступительного испытания в аспирантуру?", "must_contain": ["60"], "expected_source": "Правила приема АСП.pdf"}
+{"question": "Что является основанием для прекращения образовательных отношений при отчислении?", "must_contain": ["приказ", "отчислен"], "expected_source": "П-8.1b-03-2023 Порядок оформления возникновения_ приостановления и прекращения образовательных отношений между КНИТУ-КАИ и обучающимися и (или) родителями (законными представителями) несовершеннолетних обучаю.pdf"}

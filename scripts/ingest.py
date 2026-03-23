@@ -5,7 +5,7 @@ from pathlib import Path
 
 import opendataloader_pdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 DENSE_MODEL = "intfloat/multilingual-e5-large"
 SPARSE_MODEL = "Qdrant/bm25"
@@ -14,6 +14,14 @@ COLLECTION_NAME = "university_docs_odl"
 DATA_DIR = Path("data")
 OUTPUT_DIR = Path("odl_output")
 RECREATE_COLLECTION = True
+UPLOAD_BATCH_SIZE = 64
+FILTERABLE_FIELDS = (
+    "source",
+    "doc_group",
+    "doc_type",
+    "doc_scope",
+    "program_level",
+)
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=600,
@@ -46,6 +54,107 @@ def setup_collection():
         print(f"Коллекция '{COLLECTION_NAME}' создана.")
     else:
         print(f"Коллекция '{COLLECTION_NAME}' уже существует.")
+
+    ensure_payload_indexes()
+
+
+def ensure_payload_indexes():
+    for field_name in FILTERABLE_FIELDS:
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name=field_name,
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+
+
+def build_preview_text(pages, page_limit: int = 2, max_chars: int = 2500):
+    preview_parts = []
+
+    for _, page_text in pages[:page_limit]:
+        compact = " ".join(page_text.split()).strip()
+        if compact:
+            preview_parts.append(compact)
+
+    return " ".join(preview_parts)[:max_chars].lower()
+
+
+def infer_document_profile(pdf_name: str, preview_text: str):
+    lowered_name = pdf_name.lower()
+    combined = f"{lowered_name}\n{preview_text}"
+
+    profile = {
+        "doc_group": "other",
+        "doc_type": "reference",
+        "doc_scope": "university",
+        "program_level": "generic",
+        "doc_title": pdf_name,
+    }
+
+    if any(
+        keyword in combined
+        for keyword in (
+            "набережночелнинский филиал",
+            "нчф",
+            "филиал книту-каи",
+            "university.pdf",
+        )
+    ):
+        profile.update(
+            {
+                "doc_group": "branch",
+                "doc_type": "overview",
+                "doc_scope": "branch",
+                "program_level": "branch",
+            }
+        )
+        return profile
+
+    if "правила приема" in combined:
+        profile.update(
+            {
+                "doc_group": "admission",
+                "doc_type": "rules",
+                "doc_scope": "university",
+            }
+        )
+
+        if "правила приема асп" in lowered_name:
+            profile["program_level"] = "asp"
+        elif "правила приема спо" in lowered_name:
+            profile["program_level"] = "spo"
+        elif "правила приема bo" in lowered_name:
+            profile["program_level"] = "bo"
+        elif any(keyword in combined for keyword in ("аспирантур", "аспирант", "научно-педагогических кадров")):
+            profile["program_level"] = "asp"
+        elif any(keyword in combined for keyword in ("среднего профессионального", "правила приема спо", "правила приема spo", "спо")):
+            profile["program_level"] = "spo"
+        elif any(keyword in combined for keyword in ("бакалавриат", "специалитет", "магистратур", "правила приема bo", "правила приема во", " bo")):
+            profile["program_level"] = "bo"
+
+        return profile
+
+    if any(
+        keyword in combined
+        for keyword in (
+            "образовательных отношений",
+            "приостанов",
+            "прекращени",
+            "отчисл",
+            "перевод",
+            "восстанов",
+            "порядок оформления",
+        )
+    ):
+        profile.update(
+            {
+                "doc_group": "regulations",
+                "doc_type": "regulation",
+                "doc_scope": "university",
+            }
+        )
+        return profile
+
+    return profile
 
 
 def table_to_text(node):
@@ -117,6 +226,23 @@ def extract_pages_from_json(json_path: Path):
     return result
 
 
+def upload_batches(documents, metadatas):
+    total = len(documents)
+
+    for start in range(0, total, UPLOAD_BATCH_SIZE):
+        end = start + UPLOAD_BATCH_SIZE
+        batch_documents = documents[start:end]
+        batch_metadatas = metadatas[start:end]
+
+        print(f"Загружаю чанки {start + 1}-{min(end, total)} из {total}...")
+        client.add(
+            collection_name=COLLECTION_NAME,
+            documents=batch_documents,
+            metadata=batch_metadatas,
+            batch_size=32,
+        )
+
+
 def main():
     pdf_files = sorted(DATA_DIR.glob("*.pdf"))
 
@@ -150,6 +276,8 @@ def main():
             continue
 
         pages = extract_pages_from_json(json_path)
+        preview_text = build_preview_text(pages)
+        doc_profile = infer_document_profile(pdf.name, preview_text)
         print(f"PDF обработан OpenDataLoader: {pdf.name}")
 
         for page_number, page_text in pages:
@@ -167,6 +295,7 @@ def main():
                         "page": page_number,
                         "chunk_index": i,
                         "parser": "opendataloader",
+                        **doc_profile,
                     }
                 )
 
@@ -174,13 +303,8 @@ def main():
         print("Не найдено документов для индексации.")
         return
 
-    print(f"Загружаю {len(documents)} чанков в Qdrant...")
-    client.add(
-        collection_name=COLLECTION_NAME,
-        documents=documents,
-        metadata=metadatas,
-        batch_size=32,
-    )
+    print(f"Подготовлено {len(documents)} чанков для индексации.")
+    upload_batches(documents, metadatas)
     print("Готово! Данные проиндексированы через OpenDataLoader.")
 
 
