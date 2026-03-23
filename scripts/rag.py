@@ -7,8 +7,8 @@ from qdrant_client import QdrantClient, models
 load_dotenv()
 
 DENSE_MODEL = "intfloat/multilingual-e5-large"
-SPARSE_MODEL = "qdrant/bm25"
-COLLECTION_NAME = "university_docsNEW"
+SPARSE_MODEL = "Qdrant/bm25"
+COLLECTION_NAME = "university_docs_odl"
 CANDIDATE_LIMIT = 20
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -71,6 +71,7 @@ def ask_question(question: str):
     if not context_parts:
         return "Извини, у меня нет информации по этому вопросу. Попробуй переформулировать."
 
+    context_parts = context_parts[:3]
     context = "\n\n".join(context_parts)
     prompt = f"Контекст из документов:\n{context}\n\nВопрос студента: {question}"
 

@@ -1,81 +1,188 @@
-import fitz
+import json
+import os
+import shutil
 from pathlib import Path
-from qdrant_client import QdrantClient
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-pdf_files = list(Path("data").glob("*.pdf"))
+import opendataloader_pdf
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from qdrant_client import QdrantClient
+
+DENSE_MODEL = "intfloat/multilingual-e5-large"
+SPARSE_MODEL = "Qdrant/bm25"
+COLLECTION_NAME = "university_docs_odl"
+
+DATA_DIR = Path("data")
+OUTPUT_DIR = Path("odl_output")
+RECREATE_COLLECTION = True
+
 splitter = RecursiveCharacterTextSplitter(
-chunk_size=600,     
-chunk_overlap=120,    
-separators=["\n\n", "\n", ". ", " "]
+    chunk_size=600,
+    chunk_overlap=120,
+    separators=["\n\n", "\n", ". ", " "],
 )
+
 client = QdrantClient(
     url="http://localhost:6333",
     timeout=30,
     trust_env=False,
     check_compatibility=False,
 )
-DENSE_MODEL = "intfloat/multilingual-e5-large"
-SPARSE_MODEL = "qdrant/bm25"
-COLLECTION_NAME = "university_docsNEW"
-client.set_model(DENSE_MODEL)
-client.set_sparse_model(SPARSE_MODEL)
 
-if not client.collection_exists(COLLECTION_NAME):
+
+def setup_collection():
+    client.set_model(DENSE_MODEL)
+    client.set_sparse_model(SPARSE_MODEL)
+
+    if RECREATE_COLLECTION and client.collection_exists(COLLECTION_NAME):
+        client.delete_collection(COLLECTION_NAME)
+        print(f"Старая коллекция '{COLLECTION_NAME}' удалена.")
+
+    if not client.collection_exists(COLLECTION_NAME):
         client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=client.get_fastembed_vector_params(),
             sparse_vectors_config=client.get_fastembed_sparse_vector_params(),
         )
-        print(f"Готово, '{COLLECTION_NAME}'  создана!")
-else:
-    print(f"уже есть '{COLLECTION_NAME}' ")
+        print(f"Коллекция '{COLLECTION_NAME}' создана.")
+    else:
+        print(f"Коллекция '{COLLECTION_NAME}' уже существует.")
 
-def extract_textANDtables_from_pdf(pdf):
-    doc = fitz.open(pdf)
-    pages = []
 
-    for page_index, page in enumerate(doc, start=1):
-        page_text = page.get_text("text").strip()
+def table_to_text(node):
+    rows = node.get("rows", [])
+    if not rows:
+        return str(node.get("content", "")).strip()
+
+    row_texts = []
+    for row in rows:
+        cell_values = []
+
+        for cell in row.get("cells", []):
+            parts = []
+
+            for kid in cell.get("kids", []):
+                if isinstance(kid, dict):
+                    text = str(kid.get("content", "")).strip()
+                    if text:
+                        parts.append(text)
+
+            cell_text = " ".join(parts).strip()
+            cell_values.append(cell_text)
+
+        if any(cell_values):
+            row_texts.append(" | ".join(cell_values))
+
+    return "\n".join(row_texts).strip()
+
+
+def walk_elements(node):
+    if isinstance(node, list):
+        for item in node:
+            yield from walk_elements(item)
+        return
+
+    if not isinstance(node, dict):
+        return
+
+    node_type = node.get("type")
+    page_number = node.get("page number")
+
+    if node_type in {"heading", "paragraph", "caption", "list item"}:
+        content = str(node.get("content", "")).strip()
+        if page_number and content:
+            yield page_number, content
+
+    if node_type == "table":
+        table_text = table_to_text(node)
+        if page_number and table_text:
+            yield page_number, table_text
+
+    yield from walk_elements(node.get("kids", []))
+    yield from walk_elements(node.get("list items", []))
+
+
+def extract_pages_from_json(json_path: Path):
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    pages = {}
+
+    for page_number, text in walk_elements(data.get("kids", [])):
+        pages.setdefault(page_number, []).append(text)
+
+    result = []
+    for page_number in sorted(pages):
+        page_text = "\n\n".join(pages[page_number]).strip()
         if page_text:
-            pages.append((page_index, page_text))
-    doc.close()
-    return pages
+            result.append((page_number, page_text))
+
+    return result
 
 
+def main():
+    pdf_files = sorted(DATA_DIR.glob("*.pdf"))
 
-for pdf in pdf_files:
+    if not pdf_files:
+        print("В папке data нет PDF-файлов.")
+        return
+
+    setup_collection()
+
+    if OUTPUT_DIR.exists():
+        shutil.rmtree(OUTPUT_DIR)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    os.environ.setdefault("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8")
+
+    opendataloader_pdf.convert(
+        input_path=[str(pdf) for pdf in pdf_files],
+        output_dir=str(OUTPUT_DIR),
+        format="json,markdown",
+        use_struct_tree=True,
+    )
+
     documents = []
     metadatas = []
 
-    pages = extract_textANDtables_from_pdf(pdf)
-    print(f"Пдф файл прочитан {pdf.name}")
+    for pdf in pdf_files:
+        json_path = OUTPUT_DIR / f"{pdf.stem}.json"
 
-    for page_number, page_text in pages:
-        chunks = splitter.split_text(page_text)
+        if not json_path.exists():
+            print(f"Не найден JSON-результат для {pdf.name}")
+            continue
 
-        for i, chunk_text in enumerate(chunks):
-            chunk_text = chunk_text.strip()
-            if not chunk_text:
-                continue
-            documents.append(chunk_text)
-            metadatas.append(
-                {
-                    "source": pdf.name,
-                    "page": page_number,
-                    "chunk_index": i,
-                    "parser": "fitz",
-                }
-            )
+        pages = extract_pages_from_json(json_path)
+        print(f"PDF обработан OpenDataLoader: {pdf.name}")
 
-    if documents:
-        print(f"Загружаю {len(documents)} чанков в Qdrant...")
-        client.add(
-            collection_name=COLLECTION_NAME,
-            documents=documents,
-            metadata=metadatas,
-            batch_size=32,
-        )
-        print("Успех! Данные проиндексированы для будущего hybrid search.")
-    else:
-        print("Ошибка: не найдено документов для индексации.")
+        for page_number, page_text in pages:
+            chunks = splitter.split_text(page_text)
+
+            for i, chunk_text in enumerate(chunks):
+                chunk_text = chunk_text.strip()
+                if not chunk_text:
+                    continue
+
+                documents.append(chunk_text)
+                metadatas.append(
+                    {
+                        "source": pdf.name,
+                        "page": page_number,
+                        "chunk_index": i,
+                        "parser": "opendataloader",
+                    }
+                )
+
+    if not documents:
+        print("Не найдено документов для индексации.")
+        return
+
+    print(f"Загружаю {len(documents)} чанков в Qdrant...")
+    client.add(
+        collection_name=COLLECTION_NAME,
+        documents=documents,
+        metadata=metadatas,
+        batch_size=32,
+    )
+    print("Готово! Данные проиндексированы через OpenDataLoader.")
+
+
+if __name__ == "__main__":
+    main()

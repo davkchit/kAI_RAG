@@ -1,0 +1,14 @@
+{"question": "Кто директор набережночелнинского филиала?", "must_contain": ["Мустафин Азат Филькатович"], "expected_source": "university.pdf"}
+{"question": "Какой адрес набережночелнинского филиала?", "must_contain": ["423814"], "expected_source": "university.pdf"}
+{"question": "Есть ли у филиала собственное общежитие?", "must_contain": ["отсутств"], "expected_source": "university.pdf"}
+{"question": "Есть ли военный учебный центр?", "must_contain": ["отсутств"], "expected_source": "university.pdf"}
+{"question": "Какая средняя стоимость очного обучения?", "must_contain": ["172 000"], "expected_source": "university.pdf"}
+{"question": "Какой номер лицензии у филиала?", "must_contain": ["Л035-00115-16/00097156"], "expected_source": "university.pdf"}
+{"question": "Какой номер аккредитации у филиала?", "must_contain": ["А007-00115-16/01255601"], "expected_source": "university.pdf"}
+{"question": "До какого срока надо подать заявку на целевую квоту через КАМАЗ?", "must_contain": ["до начала июля"], "expected_source": "university.pdf"}
+{"question": "Есть ли магистратура?", "must_contain": ["магистрат"], "expected_source": "Правила приема BO.pdf"}
+{"question": "Какой телефон приемной директора филиала?", "must_contain": ["8(8552) 99-91-95"], "expected_source": "university.pdf"}
+{"question": "Какие соцсети есть у филиала?", "must_contain": ["VK", "Telegram"], "expected_source": "university.pdf"}
+{"question": "Как зовут ректора КНИТУ-КАИ?", "must_contain": ["Алибаев Тимур Лазович"], "expected_source": "university.pdf"}
+{"question": "Есть ли у филиала военный учебный центр и общежитие?", "must_contain": ["военный учебный центр", "общежитие", "отсутств"], "expected_source": "university.pdf"}
+{"question": "Какой телефон приемной комиссии филиала?", "must_contain": ["8-963-123-59-43"], "expected_source": "university.pdf"}
