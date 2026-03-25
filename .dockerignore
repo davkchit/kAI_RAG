@@ -1,0 +1,9 @@
+.git
+.gitignore
+.vscode
+__pycache__/
+*.pyc
+.env
+odl_output/
+data/
+*.pdf

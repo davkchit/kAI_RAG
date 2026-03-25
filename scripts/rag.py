@@ -17,7 +17,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client_groq = Groq(api_key=GROQ_API_KEY)
 
 client = QdrantClient(
-    url="http://localhost:6333",
+    url=os.getenv("QDRANT_URL", "http://localhost:6333"),
     timeout=30,
     trust_env=False,
     check_compatibility=False,
@@ -500,7 +500,7 @@ def ask_question(question: str):
 
 if __name__ == "__main__":
     try:
-        print(ask_question("меня звать биллиан ауто дес Аутоим. Desno, sir vi achete nah billie?"))
+        print(ask_question("привет"))
     except Exception as e:
         print(f"Произошла ошибка: {e}")
 
