@@ -1,32 +1,49 @@
-﻿import os
+import os
 
+import httpx
 from dotenv import load_dotenv
+from fastembed import SparseTextEmbedding
 from groq import Groq
 from qdrant_client import QdrantClient, models
 
 load_dotenv()
 
-DENSE_MODEL = "intfloat/multilingual-e5-large"
-SPARSE_MODEL = "Qdrant/bm25"
+DENSE_DIM = 1024  # jina-embeddings-v3
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
 COLLECTION_NAME = "university_docs_odl"
 CANDIDATE_LIMIT = 20
 ROUTE_LIMIT = 3
 CONTEXT_LIMIT = 3
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+JINA_API_KEY = os.getenv("JINA_API_KEY")
+
 client_groq = Groq(api_key=GROQ_API_KEY)
 
 client = QdrantClient(
     url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+    api_key=os.getenv("QDRANT_API_KEY"),
     timeout=30,
-    trust_env=False,
     check_compatibility=False,
 )
-client.set_model(DENSE_MODEL)
-client.set_sparse_model(SPARSE_MODEL)
 
-DENSE_VECTOR_NAME = next(iter(client.get_fastembed_vector_params().keys()))
-SPARSE_VECTOR_NAME = next(iter(client.get_fastembed_sparse_vector_params().keys()))
+sparse_model = SparseTextEmbedding("Qdrant/bm25")
+
+
+def get_dense_embedding(text: str) -> list[float]:
+    response = httpx.post(
+        "https://api.jina.ai/v1/embeddings",
+        headers={"Authorization": f"Bearer {JINA_API_KEY}", "Content-Type": "application/json"},
+        json={"model": "jina-embeddings-v3", "input": [text], "task": "retrieval.query"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()["data"][0]["embedding"]
+
+
+def get_sparse_embedding(text: str):
+    return next(sparse_model.embed([text]))
 
 
 def normalize_text(text: str):
@@ -362,6 +379,7 @@ def build_route_plan(question: str):
 
     return routes
 
+
 def build_hit_key(hit):
     if hit.id is not None:
         return hit.id
@@ -375,17 +393,23 @@ def build_hit_key(hit):
 
 
 def run_hybrid_query(search_text: str, collection_name: str, limit: int = 5, route_filter=None):
+    dense_vec = get_dense_embedding(search_text)
+    sparse_vec = get_sparse_embedding(search_text)
+
     response = client.query_points(
         collection_name=collection_name,
         prefetch=[
             models.Prefetch(
-                query=models.Document(text=search_text, model=DENSE_MODEL),
+                query=dense_vec,
                 using=DENSE_VECTOR_NAME,
                 filter=route_filter,
                 limit=CANDIDATE_LIMIT,
             ),
             models.Prefetch(
-                query=models.Document(text=search_text, model=SPARSE_MODEL),
+                query=models.SparseVector(
+                    indices=sparse_vec.indices.tolist(),
+                    values=sparse_vec.values.tolist(),
+                ),
                 using=SPARSE_VECTOR_NAME,
                 filter=route_filter,
                 limit=CANDIDATE_LIMIT,
@@ -503,5 +527,3 @@ if __name__ == "__main__":
         print(ask_question("привет"))
     except Exception as e:
         print(f"Произошла ошибка: {e}")
-
-

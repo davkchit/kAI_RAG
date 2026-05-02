@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Bash(python -m scripts.ingest)",
+      "Bash(set PYTHONUTF8=1)",
+      "Bash(python -X utf8 -m scripts.ingest)",
+      "Bash(python -X utf8 eval_smoke.py)"
+    ]
+  }
+}

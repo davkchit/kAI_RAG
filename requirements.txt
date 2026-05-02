@@ -1,0 +1,12 @@
+# API service
+fastapi
+uvicorn[standard]
+qdrant-client
+fastembed[bm25]
+groq
+httpx
+python-dotenv
+
+# Ingest only (run locally, not in Docker)
+langchain-text-splitters
+opendataloader-pdf

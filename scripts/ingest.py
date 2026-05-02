@@ -3,12 +3,18 @@ import os
 import shutil
 from pathlib import Path
 
+import httpx
 import opendataloader_pdf
+from dotenv import load_dotenv
+from fastembed import SparseTextEmbedding
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
 
-DENSE_MODEL = "intfloat/multilingual-e5-large"
-SPARSE_MODEL = "Qdrant/bm25"
+load_dotenv()
+
+DENSE_DIM = 1024  # jina-embeddings-v3
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
 COLLECTION_NAME = "university_docs_odl"
 
 DATA_DIR = Path("data")
@@ -23,24 +29,36 @@ FILTERABLE_FIELDS = (
     "program_level",
 )
 
+JINA_API_KEY = os.getenv("JINA_API_KEY")
+
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=600,
     chunk_overlap=120,
     separators=["\n\n", "\n", ". ", " "],
 )
 
+sparse_model = SparseTextEmbedding("Qdrant/bm25")
+
 client = QdrantClient(
-    url="http://localhost:6333",
+    url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+    api_key=os.getenv("QDRANT_API_KEY"),
     timeout=30,
-    trust_env=False,
     check_compatibility=False,
 )
 
 
-def setup_collection():
-    client.set_model(DENSE_MODEL)
-    client.set_sparse_model(SPARSE_MODEL)
+def get_jina_embeddings(texts: list[str]) -> list[list[float]]:
+    response = httpx.post(
+        "https://api.jina.ai/v1/embeddings",
+        headers={"Authorization": f"Bearer {JINA_API_KEY}", "Content-Type": "application/json"},
+        json={"model": "jina-embeddings-v3", "input": texts, "task": "retrieval.passage"},
+        timeout=120,
+    )
+    response.raise_for_status()
+    return [item["embedding"] for item in response.json()["data"]]
 
+
+def setup_collection():
     if RECREATE_COLLECTION and client.collection_exists(COLLECTION_NAME):
         client.delete_collection(COLLECTION_NAME)
         print(f"Старая коллекция '{COLLECTION_NAME}' удалена.")
@@ -48,8 +66,15 @@ def setup_collection():
     if not client.collection_exists(COLLECTION_NAME):
         client.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=client.get_fastembed_vector_params(),
-            sparse_vectors_config=client.get_fastembed_sparse_vector_params(),
+            vectors_config={
+                DENSE_VECTOR_NAME: models.VectorParams(
+                    size=DENSE_DIM,
+                    distance=models.Distance.COSINE,
+                )
+            },
+            sparse_vectors_config={
+                SPARSE_VECTOR_NAME: models.SparseVectorParams()
+            },
         )
         print(f"Коллекция '{COLLECTION_NAME}' создана.")
     else:
@@ -228,19 +253,37 @@ def extract_pages_from_json(json_path: Path):
 
 def upload_batches(documents, metadatas):
     total = len(documents)
+    point_id = 0
 
     for start in range(0, total, UPLOAD_BATCH_SIZE):
-        end = start + UPLOAD_BATCH_SIZE
-        batch_documents = documents[start:end]
-        batch_metadatas = metadatas[start:end]
+        end = min(start + UPLOAD_BATCH_SIZE, total)
+        batch_docs = documents[start:end]
+        batch_meta = metadatas[start:end]
 
-        print(f"Загружаю чанки {start + 1}-{min(end, total)} из {total}...")
-        client.add(
-            collection_name=COLLECTION_NAME,
-            documents=batch_documents,
-            metadata=batch_metadatas,
-            batch_size=32,
-        )
+        print(f"Получаю эмбеддинги для чанков {start + 1}–{end} из {total}...")
+
+        dense_vecs = get_jina_embeddings(batch_docs)
+        sparse_vecs = list(sparse_model.embed(batch_docs))
+
+        points = []
+        for i, (doc, meta, d_vec, s_vec) in enumerate(zip(batch_docs, batch_meta, dense_vecs, sparse_vecs)):
+            points.append(
+                models.PointStruct(
+                    id=point_id + i,
+                    vector={
+                        DENSE_VECTOR_NAME: d_vec,
+                        SPARSE_VECTOR_NAME: models.SparseVector(
+                            indices=s_vec.indices.tolist(),
+                            values=s_vec.values.tolist(),
+                        ),
+                    },
+                    payload={"document": doc, **meta},
+                )
+            )
+
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
+        point_id += len(batch_docs)
+        print(f"  Загружено.")
 
 
 def main():
@@ -305,7 +348,7 @@ def main():
 
     print(f"Подготовлено {len(documents)} чанков для индексации.")
     upload_batches(documents, metadatas)
-    print("Готово! Данные проиндексированы через OpenDataLoader.")
+    print("Готово! Данные проиндексированы.")
 
 
 if __name__ == "__main__":
