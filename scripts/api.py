@@ -1,4 +1,5 @@
 import os
+import re
 
 import httpx
 from dotenv import load_dotenv
@@ -6,6 +7,10 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from scripts.rag import ask_question
+
+
+def strip_citation(text: str) -> str:
+    return re.sub(r"\n?\[src:[^\]]+\]", "", text).strip()
 
 load_dotenv()
 
@@ -50,7 +55,7 @@ async def telegram_webhook(request: Request):
     if not chat_id or not text:
         return {"ok": True}
 
-    answer = ask_question(text)
+    answer = strip_citation(ask_question(text))
 
     async with httpx.AsyncClient() as client:
         await client.post(

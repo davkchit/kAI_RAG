@@ -1,8 +1,6 @@
 .env
 __pycache__/
 .vscode
-data/*
-!data/university.pdf
 odl_output/
 odl_probe/
 *.pyc
