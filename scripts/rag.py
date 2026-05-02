@@ -2,7 +2,6 @@ import os
 
 import httpx
 from dotenv import load_dotenv
-from fastembed import SparseTextEmbedding
 from groq import Groq
 from qdrant_client import QdrantClient, models
 
@@ -28,9 +27,6 @@ client = QdrantClient(
     check_compatibility=False,
 )
 
-sparse_model = SparseTextEmbedding("Qdrant/bm25")
-
-
 def get_dense_embedding(text: str) -> list[float]:
     response = httpx.post(
         "https://api.jina.ai/v1/embeddings",
@@ -40,10 +36,6 @@ def get_dense_embedding(text: str) -> list[float]:
     )
     response.raise_for_status()
     return response.json()["data"][0]["embedding"]
-
-
-def get_sparse_embedding(text: str):
-    return next(sparse_model.embed([text]))
 
 
 def normalize_text(text: str):
@@ -394,28 +386,12 @@ def build_hit_key(hit):
 
 def run_hybrid_query(search_text: str, collection_name: str, limit: int = 5, route_filter=None):
     dense_vec = get_dense_embedding(search_text)
-    sparse_vec = get_sparse_embedding(search_text)
 
     response = client.query_points(
         collection_name=collection_name,
-        prefetch=[
-            models.Prefetch(
-                query=dense_vec,
-                using=DENSE_VECTOR_NAME,
-                filter=route_filter,
-                limit=CANDIDATE_LIMIT,
-            ),
-            models.Prefetch(
-                query=models.SparseVector(
-                    indices=sparse_vec.indices.tolist(),
-                    values=sparse_vec.values.tolist(),
-                ),
-                using=SPARSE_VECTOR_NAME,
-                filter=route_filter,
-                limit=CANDIDATE_LIMIT,
-            ),
-        ],
-        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        query=dense_vec,
+        using=DENSE_VECTOR_NAME,
+        query_filter=route_filter,
         with_payload=True,
         limit=limit,
     )
