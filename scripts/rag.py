@@ -100,7 +100,8 @@ def is_chitchat(text: str) -> bool:
 
 
 def search_candidates(question: str, collection_name: str, limit: int = CANDIDATE_LIMIT) -> list:
-    dense_vec = get_dense_embedding(question)
+    search_text = f"{question} НЧФ КНИТУ-КАИ набережные челны"
+    dense_vec = get_dense_embedding(search_text)
     response = client.query_points(
         collection_name=collection_name,
         query=dense_vec,
