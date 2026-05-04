@@ -94,12 +94,10 @@ def ensure_payload_indexes():
 
 def build_preview_text(pages, page_limit: int = 2, max_chars: int = 2500):
     preview_parts = []
-
     for _, page_text in pages[:page_limit]:
         compact = " ".join(page_text.split()).strip()
         if compact:
             preview_parts.append(compact)
-
     return " ".join(preview_parts)[:max_chars].lower()
 
 
@@ -142,7 +140,6 @@ def infer_document_profile(pdf_name: str, preview_text: str):
                 "doc_scope": "university",
             }
         )
-
         if "правила приема асп" in lowered_name:
             profile["program_level"] = "asp"
         elif "правила приема спо" in lowered_name:
@@ -155,7 +152,6 @@ def infer_document_profile(pdf_name: str, preview_text: str):
             profile["program_level"] = "spo"
         elif any(keyword in combined for keyword in ("бакалавриат", "специалитет", "магистратур", "правила приема bo", "правила приема во", " bo")):
             profile["program_level"] = "bo"
-
         return profile
 
     if any(
@@ -190,19 +186,15 @@ def table_to_text(node):
     row_texts = []
     for row in rows:
         cell_values = []
-
         for cell in row.get("cells", []):
             parts = []
-
             for kid in cell.get("kids", []):
                 if isinstance(kid, dict):
                     text = str(kid.get("content", "")).strip()
                     if text:
                         parts.append(text)
-
             cell_text = " ".join(parts).strip()
             cell_values.append(cell_text)
-
         if any(cell_values):
             row_texts.append(" | ".join(cell_values))
 
@@ -251,22 +243,69 @@ def extract_pages_from_json(json_path: Path):
     return result
 
 
-def upload_batches(documents, metadatas):
-    total = len(documents)
+def load_faq(faq_path: Path):
+    """Load FAQ entries from data/faq.md — each ## section is one entry."""
+    if not faq_path.exists():
+        return [], [], []
+
+    text = faq_path.read_text(encoding="utf-8")
+    sections = text.split("\n## ")
+
+    embed_texts = []
+    display_texts = []
+    metadatas = []
+
+    for section in sections:
+        section = section.strip().lstrip("# ").strip()
+        if not section:
+            continue
+
+        lines = section.split("\n", 1)
+        question = lines[0].strip()
+        answer = lines[1].strip() if len(lines) > 1 else ""
+
+        if not answer:
+            continue
+
+        embed_text = f"{question}\n{answer}"
+        embed_texts.append(embed_text)
+        display_texts.append(answer)
+        metadatas.append({
+            "source": "faq.md",
+            "page": None,
+            "chunk_index": 0,
+            "parser": "faq",
+            "doc_group": "faq",
+            "doc_type": "faq",
+            "doc_scope": "university",
+            "program_level": "generic",
+            "doc_title": question,
+        })
+
+    print(f"FAQ: загружено {len(embed_texts)} записей из {faq_path.name}")
+    return embed_texts, display_texts, metadatas
+
+
+def upload_batches(embed_texts: list[str], display_texts: list[str], metadatas: list[dict]):
+    """embed_texts — contextualized text for embedding; display_texts — original chunk for LLM context."""
+    total = len(embed_texts)
     point_id = 0
 
     for start in range(0, total, UPLOAD_BATCH_SIZE):
         end = min(start + UPLOAD_BATCH_SIZE, total)
-        batch_docs = documents[start:end]
+        batch_embed = embed_texts[start:end]
+        batch_display = display_texts[start:end]
         batch_meta = metadatas[start:end]
 
         print(f"Получаю эмбеддинги для чанков {start + 1}–{end} из {total}...")
 
-        dense_vecs = get_jina_embeddings(batch_docs)
-        sparse_vecs = list(sparse_model.embed(batch_docs))
+        dense_vecs = get_jina_embeddings(batch_embed)
+        sparse_vecs = list(sparse_model.embed(batch_embed))
 
         points = []
-        for i, (doc, meta, d_vec, s_vec) in enumerate(zip(batch_docs, batch_meta, dense_vecs, sparse_vecs)):
+        for i, (display_doc, meta, d_vec, s_vec) in enumerate(
+            zip(batch_display, batch_meta, dense_vecs, sparse_vecs)
+        ):
             points.append(
                 models.PointStruct(
                     id=point_id + i,
@@ -277,12 +316,12 @@ def upload_batches(documents, metadatas):
                             values=s_vec.values.tolist(),
                         ),
                     },
-                    payload={"document": doc, **meta},
+                    payload={"document": display_doc, **meta},
                 )
             )
 
         client.upsert(collection_name=COLLECTION_NAME, points=points)
-        point_id += len(batch_docs)
+        point_id += len(batch_display)
         print(f"  Загружено.")
 
 
@@ -308,8 +347,9 @@ def main():
         use_struct_tree=True,
     )
 
-    documents = []
-    metadatas = []
+    all_embed_texts = []
+    all_display_texts = []
+    all_metadatas = []
 
     for pdf in pdf_files:
         json_path = OUTPUT_DIR / f"{pdf.stem}.json"
@@ -331,8 +371,12 @@ def main():
                 if not chunk_text:
                     continue
 
-                documents.append(chunk_text)
-                metadatas.append(
+                # Contextual chunking: prefix with document title and page for richer embedding
+                embed_text = f"[{doc_profile['doc_title']}, стр. {page_number}]\n{chunk_text}"
+
+                all_embed_texts.append(embed_text)
+                all_display_texts.append(chunk_text)
+                all_metadatas.append(
                     {
                         "source": pdf.name,
                         "page": page_number,
@@ -342,12 +386,18 @@ def main():
                     }
                 )
 
-    if not documents:
+    # Load FAQ entries if present
+    faq_embed, faq_display, faq_meta = load_faq(DATA_DIR / "faq.md")
+    all_embed_texts.extend(faq_embed)
+    all_display_texts.extend(faq_display)
+    all_metadatas.extend(faq_meta)
+
+    if not all_embed_texts:
         print("Не найдено документов для индексации.")
         return
 
-    print(f"Подготовлено {len(documents)} чанков для индексации.")
-    upload_batches(documents, metadatas)
+    print(f"Подготовлено {len(all_embed_texts)} чанков для индексации.")
+    upload_batches(all_embed_texts, all_display_texts, all_metadatas)
     print("Готово! Данные проиндексированы.")
 
 

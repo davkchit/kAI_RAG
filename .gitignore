@@ -3,6 +3,7 @@ __pycache__/
 .vscode
 data/*
 !data/university.pdf
+!data/faq.md
 odl_output/
 odl_probe/
 *.pyc
