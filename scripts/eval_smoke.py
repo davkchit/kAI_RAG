@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from rag import COLLECTION_NAME, ask_question, hybrid_search
+from rag import COLLECTION_NAME, ask_question, search_candidates
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "eval_questions.jsonl"
 
@@ -25,7 +25,7 @@ def main():
 
     for i, case in enumerate(cases, start=1):
         question = case["question"]
-        hits = hybrid_search(question, COLLECTION_NAME, limit=5)
+        hits = search_candidates(question, COLLECTION_NAME, limit=5)
 
         top_source = ""
         if hits:
