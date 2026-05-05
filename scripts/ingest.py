@@ -33,7 +33,7 @@ JINA_API_KEY = os.getenv("JINA_API_KEY")
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=300,
-    chunk_overlap=60,
+    chunk_overlap=120,
     separators=["\n\n", "\n", ". ", " "],
 )
 
