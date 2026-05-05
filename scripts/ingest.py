@@ -91,6 +91,19 @@ def ensure_payload_indexes():
             field_schema=models.PayloadSchemaType.KEYWORD,
         )
 
+    # Full-text index for hybrid BM25-like search (names, numbers, exact terms)
+    client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="document",
+        field_schema=models.TextIndexParams(
+            type="text",
+            tokenizer=models.TokenizerType.WORD,
+            min_token_len=2,
+            max_token_len=30,
+            lowercase=True,
+        ),
+    )
+
 
 def build_preview_text(pages, page_limit: int = 2, max_chars: int = 2500):
     preview_parts = []

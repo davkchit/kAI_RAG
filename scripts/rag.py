@@ -3,15 +3,14 @@ import os
 import httpx
 from dotenv import load_dotenv
 from groq import Groq
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 load_dotenv()
 
-DENSE_DIM = 1024
 DENSE_VECTOR_NAME = "dense"
 COLLECTION_NAME = "university_docs_odl"
-CANDIDATE_LIMIT = 20
-CONTEXT_LIMIT = 5
+CANDIDATE_LIMIT = 40
+CONTEXT_LIMIT = 7
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 JINA_API_KEY = os.getenv("JINA_API_KEY")
@@ -49,6 +48,26 @@ _CHITCHAT_SYSTEM_PROMPT = """ты — kAI, дружелюбный помощни
 если спрашивают что ты умеешь — скажи что помогаешь с вопросами об университете: приём, документы, контакты, расписание и т.д.
 никогда не говори "у меня нет информации" в ответ на приветствие."""
 
+_CLASSIFIER_PROMPT = """You classify questions about НЧФ КНИТУ-КАИ university branch.
+Reply with ONLY one of these exact codes (no other text):
+
+branch
+admission_bo
+admission_asp
+admission_spo
+regulations
+general
+
+Rules:
+- branch: anything about the branch itself — its address, director, rector, phone, email, social media, dormitory, military center, academic department (УМО), partners, KAMAZ, tuition price, budget seats, passing scores (проходные баллы), license number, accreditation number, ranking (рейтинг), founding year, building schedule
+- admission_bo: anything about bachelor / specialist / master (магистратура) degree — whether it exists, EGE scores, entrance exams, enrollment documents, how to apply. NOTE: магистратура is NOT аспирантура — it is admission_bo
+- admission_asp: аспирантура (PhD-level) admission only — NOT магистратура
+- admission_spo: secondary vocational (СПО) admission
+- regulations: student rules — expulsion, transfer, reinstatement, academic leave, suspension, termination of studies
+- general: everything else
+
+Output ONLY the code."""
+
 _CHITCHAT_TRIGGERS = (
     "привет", "здравствуй", "добрый", "хай", "хелло", "ку ", "дарова", "приветствую",
     "пока", "до свидан", "спасибо", "благодар", "спс", "пасиб", "благодарю",
@@ -57,6 +76,8 @@ _CHITCHAT_TRIGGERS = (
     "окей", "понятно", "хорошо", "ясно", "понял", "ок",
     "молодец", "класс", "круто", "супер", "отлично", "здорово",
 )
+
+_KNOWN_TOPICS = {"branch", "admission_bo", "admission_asp", "admission_spo", "regulations"}
 
 
 def get_dense_embedding(text: str) -> list[float]:
@@ -90,6 +111,51 @@ def rerank(question: str, hits: list, top_n: int = CONTEXT_LIMIT) -> list:
     return [hits[r["index"]] for r in results]
 
 
+def classify_query(question: str) -> str | None:
+    """Returns topic string, or None for global search."""
+    try:
+        completion = client_groq.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": _CLASSIFIER_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            temperature=0,
+            max_tokens=5,
+        )
+        topic = completion.choices[0].message.content.strip().lower().split()[0]
+        return topic if topic in _KNOWN_TOPICS else None
+    except Exception:
+        return None  # fallback to global search on any error
+
+
+def build_qdrant_filter(topic: str | None) -> models.Filter | None:
+    if not topic:
+        return None
+    if topic == "branch":
+        return models.Filter(must=[
+            models.FieldCondition(key="doc_scope", match=models.MatchValue(value="branch"))
+        ])
+    if topic == "regulations":
+        return models.Filter(must=[
+            models.FieldCondition(key="doc_group", match=models.MatchValue(value="regulations"))
+        ])
+    # Admission: include both the specific admission PDF and the branch overview
+    # (branch overview has passing scores, seat counts that complement admission rules)
+    level = topic.split("_")[-1]  # bo / asp / spo
+    return models.Filter(
+        should=[
+            models.Filter(must=[
+                models.FieldCondition(key="doc_group", match=models.MatchValue(value="admission")),
+                models.FieldCondition(key="program_level", match=models.MatchValue(value=level)),
+            ]),
+            models.Filter(must=[
+                models.FieldCondition(key="doc_scope", match=models.MatchValue(value="branch")),
+            ]),
+        ],
+    )
+
+
 def is_chitchat(text: str) -> bool:
     if text.strip() == "/start":
         return True
@@ -99,13 +165,14 @@ def is_chitchat(text: str) -> bool:
     return any(trigger in lowered for trigger in _CHITCHAT_TRIGGERS)
 
 
-def search_candidates(question: str, collection_name: str, limit: int = CANDIDATE_LIMIT) -> list:
-    search_text = f"{question} НЧФ КНИТУ-КАИ набережные челны"
-    dense_vec = get_dense_embedding(search_text)
+def search_candidates(question: str, collection_name: str, limit: int = CANDIDATE_LIMIT,
+                      query_filter: models.Filter | None = None) -> list:
+    dense_vec = get_dense_embedding(f"{question} НЧФ КНИТУ-КАИ набережные челны")
     response = client.query_points(
         collection_name=collection_name,
         query=dense_vec,
         using=DENSE_VECTOR_NAME,
+        query_filter=query_filter,
         with_payload=True,
         limit=limit,
     )
@@ -124,7 +191,10 @@ def ask_question(question: str) -> str:
         )
         return completion.choices[0].message.content
 
-    candidates = search_candidates(question, COLLECTION_NAME)
+    topic = classify_query(question)
+    query_filter = build_qdrant_filter(topic)
+
+    candidates = search_candidates(question, COLLECTION_NAME, query_filter=query_filter)
     if not candidates:
         return "Извини, у меня нет информации по этому вопросу. Лучше уточни в приёмной комиссии 💙"
 
